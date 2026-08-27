@@ -212,40 +212,51 @@ def get_catarc_detail(url):
 
 # ====================== 源4 国家标准委 ======================
 def get_gb_list():
-    """抓取国标委「强制性/推荐性国标」近期发布列表，返回含 effect_time 的条目"""
+    """抓取国标委「强制性/推荐性国标」近期发布列表（分页翻到 30 天边界）"""
     items = []
+    cutoff = _cutoff()
     for p1, gb_type in (("1", "强制性国家标准"), ("2", "推荐性国家标准")):
-        params = {"p.p1": p1, "p.p90": "circulation_date", "p.p91": "desc"}
-        resp = _get_with_retry(GB_LIST_URL, params=params, headers=HEADERS, timeout=30, verify=False)
-        resp.encoding = resp.apparent_encoding
-        soup = BeautifulSoup(resp.text, "html.parser")
-        for tr in soup.find_all("tr"):
-            tds = tr.find_all("td")
-            if len(tds) < 8:
-                continue
-            std_no = tds[1].get_text(strip=True)
-            name = tds[3].get_text(strip=True)
-            status = tds[4].get_text(strip=True)
-            pub_date = tds[5].get_text(strip=True).split(" ")[0]
-            impl_date = tds[6].get_text(strip=True).split(" ")[0]
-            if not re.match(r"^\d{4}-\d{2}-\d{2}$", pub_date):
-                continue
-            if not any(kw in name for kw in GB_AUTO_KEYWORDS):
-                continue
-            hcno = ""
-            btn = tds[7].find("button") or tds[7].find("a")
-            if btn:
-                m = re.search(r"showInfo\('([A-Fa-f0-9]+)'\)", btn.get("onclick", "") or "")
-                if m:
-                    hcno = m.group(1)
-            items.append({
-                "title": f"{std_no} {name}",
-                "pub_date": pub_date,
-                "effect_time": impl_date,
-                "source_url": GB_DETAIL_TMPL.format(hcno=hcno) if hcno else "",
-                "content": f"{gb_type}（{status}）",
-            })
-    items = [it for it in items if it["pub_date"] >= _cutoff()]
+        for page in range(1, 11):  # 安全上限，正常 1-2 页就触发 break
+            params = {"p.p1": p1, "p.p90": "circulation_date", "p.p91": "desc",
+                      "page": str(page), "pageSize": "50"}
+            resp = _get_with_retry(GB_LIST_URL, params=params, headers=HEADERS, timeout=30, verify=False)
+            resp.encoding = resp.apparent_encoding
+            soup = BeautifulSoup(resp.text, "html.parser")
+            reached_cutoff = False
+            row_count = 0
+            for tr in soup.find_all("tr"):
+                tds = tr.find_all("td")
+                if len(tds) < 8:
+                    continue
+                std_no = tds[1].get_text(strip=True)
+                name = tds[3].get_text(strip=True)
+                status = tds[4].get_text(strip=True)
+                pub_date = tds[5].get_text(strip=True).split(" ")[0]
+                impl_date = tds[6].get_text(strip=True).split(" ")[0]
+                if not re.match(r"^\d{4}-\d{2}-\d{2}$", pub_date):
+                    continue
+                row_count += 1
+                # 列表按发布日期降序，一旦早于 30 天边界，本页及后续页都不再需要
+                if pub_date < cutoff:
+                    reached_cutoff = True
+                    break
+                if not any(kw in name for kw in GB_AUTO_KEYWORDS):
+                    continue
+                hcno = ""
+                btn = tds[7].find("button") or tds[7].find("a")
+                if btn:
+                    m = re.search(r"showInfo\('([A-Fa-f0-9]+)'\)", btn.get("onclick", "") or "")
+                    if m:
+                        hcno = m.group(1)
+                items.append({
+                    "title": f"{std_no} {name}",
+                    "pub_date": pub_date,
+                    "effect_time": impl_date,
+                    "source_url": GB_DETAIL_TMPL.format(hcno=hcno) if hcno else "",
+                    "content": f"{gb_type}（{status}）",
+                })
+            if reached_cutoff or row_count == 0:
+                break
     return items
 
 
