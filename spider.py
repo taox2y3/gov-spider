@@ -74,10 +74,23 @@ def _cutoff() -> str:
     return (datetime.now() - timedelta(days=WINDOW_DAYS)).strftime("%Y-%m-%d")
 
 
+def _get_with_retry(url, params=None, headers=None, timeout=30, verify=True, retries=3):
+    """带重试的 GET，应对境外机房访问国内政府网站偶发超时/连接失败"""
+    for attempt in range(retries):
+        try:
+            return requests.get(url, params=params, headers=headers, timeout=timeout, verify=verify)
+        except (requests.exceptions.Timeout, requests.exceptions.ConnectionError) as e:
+            if attempt == retries - 1:
+                raise
+            wait = 2 ** attempt  # 1s / 2s / 4s
+            print(f"[RETRY] {url} 第 {attempt + 1} 次失败（{type(e).__name__}），{wait}s 后重试")
+            time.sleep(wait)
+
+
 # ====================== 源1 工信部 ======================
 def get_notice_list():
     """通过工信部接口获取列表，返回[{title,pub_date,detail_url}]"""
-    resp = requests.get(LIST_API, params=LIST_PARAMS, headers=HEADERS, timeout=30)
+    resp = _get_with_retry(LIST_API, params=LIST_PARAMS, headers=HEADERS, timeout=60)
     resp.encoding = "utf-8"
     data = resp.json()
     html = data.get("data", {}).get("html", "")
@@ -100,7 +113,7 @@ def get_notice_list():
 def get_detail(url):
     """抓取工信部详情页正文"""
     time.sleep(1.2)
-    resp = requests.get(url, headers=HEADERS, timeout=30)
+    resp = _get_with_retry(url, headers=HEADERS, timeout=60)
     resp.encoding = "utf-8"
     soup = BeautifulSoup(resp.text, "html.parser")
     content_div = soup.select_one("#con_con") or soup.select_one(".ccontent")
@@ -112,7 +125,7 @@ def get_detail(url):
 # ====================== 源2 缺陷产品召回中心 ======================
 def get_recall_list():
     """抓取召回中心「国内汽车召回」列表，返回[{title,pub_date,detail_url}]"""
-    resp = requests.get(RECALL_LIST_URL, headers=RECALL_HEADERS, timeout=30)
+    resp = _get_with_retry(RECALL_LIST_URL, headers=RECALL_HEADERS, timeout=30)
     resp.encoding = resp.apparent_encoding
     soup = BeautifulSoup(resp.text, "html.parser")
     items = []
@@ -138,7 +151,7 @@ def get_recall_list():
 def get_recall_detail(url):
     """抓取召回详情页正文"""
     time.sleep(1.2)
-    resp = requests.get(url, headers=RECALL_HEADERS, timeout=30)
+    resp = _get_with_retry(url, headers=RECALL_HEADERS, timeout=30)
     resp.encoding = resp.apparent_encoding
     soup = BeautifulSoup(resp.text, "html.parser")
     content_div = soup.select_one(".show_txt") or soup.select_one(".TRS_Editor")
@@ -150,7 +163,7 @@ def get_recall_detail(url):
 # ====================== 源3 全国汽标委 CATARC ======================
 def get_catarc_list():
     """抓取汽标委工作动态里的标准发布/解读/制修订条目"""
-    resp = requests.get(CATARC_LIST_URL, headers=CATARC_HEADERS, timeout=30, verify=False)
+    resp = _get_with_retry(CATARC_LIST_URL, headers=CATARC_HEADERS, timeout=30, verify=False)
     resp.encoding = resp.apparent_encoding
     soup = BeautifulSoup(resp.text, "html.parser")
     items = []
@@ -179,7 +192,7 @@ def get_catarc_list():
 def get_catarc_detail(url):
     """抓取 CATARC 详情页正文"""
     time.sleep(1.0)
-    resp = requests.get(url, headers=CATARC_HEADERS, timeout=30, verify=False)
+    resp = _get_with_retry(url, headers=CATARC_HEADERS, timeout=30, verify=False)
     resp.encoding = resp.apparent_encoding
     soup = BeautifulSoup(resp.text, "html.parser")
     content = None
@@ -203,7 +216,7 @@ def get_gb_list():
     items = []
     for p1, gb_type in (("1", "强制性国家标准"), ("2", "推荐性国家标准")):
         params = {"p.p1": p1, "p.p90": "circulation_date", "p.p91": "desc"}
-        resp = requests.get(GB_LIST_URL, params=params, headers=HEADERS, timeout=30, verify=False)
+        resp = _get_with_retry(GB_LIST_URL, params=params, headers=HEADERS, timeout=30, verify=False)
         resp.encoding = resp.apparent_encoding
         soup = BeautifulSoup(resp.text, "html.parser")
         for tr in soup.find_all("tr"):
