@@ -1,0 +1,34 @@
+name: Daily Auto Spider
+
+on:
+  schedule:
+    # 每天北京时间 9:00 运行（UTC 需减 8 小时，即 1:00）
+    - cron: '0 1 * * *'
+  workflow_dispatch:  # 保留这个，方便随时在网页点按钮手动测试
+
+jobs:
+  run-spider:
+    runs-on: ubuntu-latest
+    steps:
+      - name: 拉取代码
+        uses: actions/checkout@v4
+
+      - name: 安装 Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.10'
+
+      - name: 安装依赖
+        run: pip install -r requirements.txt
+
+      - name: 运行爬虫
+        run: python spider.py
+
+      - name: 上传结果（JSON + 报告）
+        uses: actions/upload-artifact@v4
+        with:
+          name: spider-result
+          path: |
+            spider_result.json
+            spider_result.md
+          if-no-files-found: error

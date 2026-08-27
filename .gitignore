@@ -1,0 +1,5 @@
+__pycache__/
+*.pyc
+*.log
+spider_result.json
+spider_result.md
